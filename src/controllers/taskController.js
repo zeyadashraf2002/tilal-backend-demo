@@ -1,9 +1,11 @@
 import Task from '../models/Task.js';
 import User from '../models/User.js';
 import Client from '../models/Client.js';
+import Site from '../models/Site.js';
 import Inventory from '../models/Inventory.js';
 import { notifyTaskAssignment, notifyTaskCompletion } from '../services/notificationService.js';
 import mongoose from 'mongoose';
+
 /**
  * @desc    Get all tasks
  * @route   GET /api/v1/tasks
@@ -11,7 +13,7 @@ import mongoose from 'mongoose';
  */
 export const getTasks = async (req, res) => {
   try {
-    const { status, worker, client, branch, priority, category } = req.query;
+    const { status, worker, client, site, branch, priority, category } = req.query;
     
     let query = {};
     
@@ -23,6 +25,7 @@ export const getTasks = async (req, res) => {
     if (status) query.status = status;
     if (worker) query.worker = worker;
     if (client) query.client = client;
+    if (site) query.site = site; // ✅ فلترة حسب الموقع
     if (branch) query.branch = branch;
     if (priority) query.priority = priority;
     if (category) query.category = category;
@@ -31,6 +34,7 @@ export const getTasks = async (req, res) => {
       .populate('client', 'name email phone address')
       .populate('worker', 'name email phone')
       .populate('branch', 'name code')
+      .populate('site', 'name siteType totalArea') // ✅ إضافة Site
       .sort('-createdAt');
 
     res.status(200).json({
@@ -58,6 +62,14 @@ export const getTask = async (req, res) => {
       .populate('client', 'name email phone address whatsapp')
       .populate('worker', 'name email phone workerDetails')
       .populate('branch', 'name code address')
+      .populate({
+        path: 'site',
+        select: 'name description siteType sections coverImage',
+        populate: {
+          path: 'client',
+          select: 'name email phone'
+        }
+      })
       .populate('materials.item', 'name sku unit')
       .populate('adminReview.reviewedBy', 'name email');
 
@@ -70,7 +82,6 @@ export const getTask = async (req, res) => {
 
     // Check authorization - Allow admin and assigned worker
     if (req.user.role !== 'admin') {
-      // If worker, check if task is assigned to them
       if (!task.worker || task.worker._id.toString() !== req.user.id) {
         return res.status(403).json({
           success: false,
@@ -79,9 +90,24 @@ export const getTask = async (req, res) => {
       }
     }
 
+    // ✅ إذا كان Task مرتبط بـ Section معين، نجيب الصور المرجعية
+    let referenceImages = [];
+    if (task.site && task.section) {
+      const site = await Site.findById(task.site);
+      if (site) {
+        const section = site.sections.id(task.section);
+        if (section && section.referenceImages) {
+          referenceImages = section.referenceImages;
+        }
+      }
+    }
+
     res.status(200).json({
       success: true,
-      data: task
+      data: {
+        ...task.toObject(),
+        referenceImages // ✅ إضافة الصور المرجعية للـ Response
+      }
     });
   } catch (error) {
     console.error('Get task error:', error);
@@ -92,6 +118,7 @@ export const getTask = async (req, res) => {
     });
   }
 };
+
 /**
  * @desc    Create new task
  * @route   POST /api/v1/tasks
@@ -101,12 +128,37 @@ export const createTask = async (req, res) => {
   try {
     const taskData = req.body;
     
-    // ✅ التحقق من وجود البيانات المطلوبة
-    if (!taskData.client) {
+    // ✅ التحقق من وجود Site (إلزامي الآن)
+    if (!taskData.site) {
       return res.status(400).json({
         success: false,
-        message: 'Client is required'
+        message: 'Site is required'
       });
+    }
+
+    // ✅ التحقق من وجود Site في قاعدة البيانات
+    const site = await Site.findById(taskData.site);
+    if (!site) {
+      return res.status(404).json({
+        success: false,
+        message: 'Site not found'
+      });
+    }
+
+    // ✅ إذا تم تحديد Section، نتحقق من وجوده
+    if (taskData.section) {
+      const section = site.sections.id(taskData.section);
+      if (!section) {
+        return res.status(404).json({
+          success: false,
+          message: 'Section not found in this site'
+        });
+      }
+    }
+
+    // ✅ استخدام Client من Site إذا لم يتم تحديده
+    if (!taskData.client) {
+      taskData.client = site.client;
     }
 
     // ✅ التحقق من صحة ObjectIds
@@ -123,7 +175,8 @@ export const createTask = async (req, res) => {
     const populatedTask = await Task.findById(task._id)
       .populate('client', 'name email phone')
       .populate('worker', 'name email')
-      .populate('branch', 'name code');
+      .populate('branch', 'name code')
+      .populate('site', 'name siteType');
 
     // Update client total tasks
     if (task.client) {
@@ -131,6 +184,11 @@ export const createTask = async (req, res) => {
         $inc: { totalTasks: 1 }
       });
     }
+
+    // ✅ Update site total tasks
+    await Site.findByIdAndUpdate(task.site, {
+      $inc: { totalTasks: 1 }
+    });
 
     res.status(201).json({
       success: true,
@@ -201,6 +259,14 @@ export const updateTask = async (req, res) => {
           $inc: { 'workerDetails.completedTasks': 1 }
         });
       }
+
+      // ✅ Update site completed tasks
+      if (task.site) {
+        await Site.findByIdAndUpdate(task.site, {
+          $inc: { completedTasks: 1 },
+          lastVisit: new Date()
+        });
+      }
     }
 
     task = await Task.findByIdAndUpdate(
@@ -210,7 +276,8 @@ export const updateTask = async (req, res) => {
     )
       .populate('client', 'name email phone')
       .populate('worker', 'name email phone')
-      .populate('branch', 'name code');
+      .populate('branch', 'name code')
+      .populate('site', 'name siteType');
 
     res.status(200).json({
       success: true,
@@ -353,7 +420,6 @@ export const completeTask = async (req, res) => {
   }
 };
 
-
 /**
  * @desc    Upload task images (before/after/reference)
  * @route   POST /api/v1/tasks/:id/images
@@ -387,7 +453,6 @@ export const uploadTaskImages = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Get uploaded files from Cloudinary middleware
     const files = req.files || [];
 
     if (files.length === 0) {
@@ -397,12 +462,10 @@ export const uploadTaskImages = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Files are already processed by Cloudinary middleware
-    // req.files now contains: [{ url, cloudinaryId, width, height }]
     const imageObjects = files.map(file => ({
-      url: file.url, // Cloudinary URL
+      url: file.url,
       cloudinaryId: file.cloudinaryId,
-      thumbnail: file.url, // Use same URL for thumbnail (Cloudinary can generate on-the-fly)
+      thumbnail: file.url,
       uploadedAt: new Date(),
       uploadedBy: req.user.id,
       isVisibleToClient: isVisibleToClient === 'true' || isVisibleToClient === true
@@ -479,7 +542,7 @@ export const deleteTaskImage = async (req, res) => {
 
     const image = imageArray[imageIndex];
 
-    // ✅ FIXED: Delete from Cloudinary
+    // Delete from Cloudinary
     if (image.cloudinaryId) {
       try {
         const { v2: cloudinary } = await import('cloudinary');

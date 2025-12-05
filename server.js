@@ -20,6 +20,7 @@ import invoiceRoutes from './src/routes/invoiceRoutes.js';
 import reportRoutes from './src/routes/reportRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
 import uploadRoutes from './src/routes/uploadRoutes.js';
+import siteRoutes from './src/routes/siteRoutes.js';
 
 // Load environment variables
 dotenv.config();
@@ -109,12 +110,14 @@ app.use(`/api/${API_VERSION}/auth`, authRoutes);
 app.use(`/api/${API_VERSION}/users`, userRoutes);
 app.use(`/api/${API_VERSION}/tasks`, taskRoutes);
 app.use(`/api/${API_VERSION}/clients`, clientRoutes);
+app.use(`/api/${API_VERSION}/sites`, siteRoutes);
 app.use(`/api/${API_VERSION}/plants`, plantRoutes);
 app.use(`/api/${API_VERSION}/inventory`, inventoryRoutes);
 app.use(`/api/${API_VERSION}/invoices`, invoiceRoutes);
 app.use(`/api/${API_VERSION}/reports`, reportRoutes);
 app.use(`/api/${API_VERSION}/notifications`, notificationRoutes);
 app.use(`/api/${API_VERSION}/uploads`, uploadRoutes); // ✅ هنا المسار المهم
+
 
 // =====================================
 // 💓 Health & Root
