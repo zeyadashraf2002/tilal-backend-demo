@@ -1,3 +1,4 @@
+// backend/src/controllers/taskController.js - ✅ UPDATED
 import Task from '../models/Task.js';
 import User from '../models/User.js';
 import Client from '../models/Client.js';
@@ -13,11 +14,10 @@ import mongoose from 'mongoose';
  */
 export const getTasks = async (req, res) => {
   try {
-    const { status, worker, client, site, branch, priority, category } = req.query;
+    const { status, worker, client, site, section, branch, priority, category } = req.query;
     
     let query = {};
     
-    // If worker, only show their tasks
     if (req.user.role === 'worker') {
       query.worker = req.user.id;
     }
@@ -25,7 +25,8 @@ export const getTasks = async (req, res) => {
     if (status) query.status = status;
     if (worker) query.worker = worker;
     if (client) query.client = client;
-    if (site) query.site = site; // ✅ فلترة حسب الموقع
+    if (site) query.site = site;
+    if (section) query.section = section; // ✅ Added
     if (branch) query.branch = branch;
     if (priority) query.priority = priority;
     if (category) query.category = category;
@@ -34,7 +35,7 @@ export const getTasks = async (req, res) => {
       .populate('client', 'name email phone address')
       .populate('worker', 'name email phone')
       .populate('branch', 'name code')
-      .populate('site', 'name siteType totalArea') // ✅ إضافة Site
+      .populate('site', 'name siteType totalArea')
       .sort('-createdAt');
 
     res.status(200).json({
@@ -80,7 +81,7 @@ export const getTask = async (req, res) => {
       });
     }
 
-    // Check authorization - Allow admin and assigned worker
+    // Check authorization
     if (req.user.role !== 'admin') {
       if (!task.worker || task.worker._id.toString() !== req.user.id) {
         return res.status(403).json({
@@ -90,7 +91,7 @@ export const getTask = async (req, res) => {
       }
     }
 
-    // ✅ إذا كان Task مرتبط بـ Section معين، نجيب الصور المرجعية
+    // ✅ Get reference images from the specific section
     let referenceImages = [];
     if (task.site && task.section) {
       const site = await Site.findById(task.site);
@@ -106,7 +107,7 @@ export const getTask = async (req, res) => {
       success: true,
       data: {
         ...task.toObject(),
-        referenceImages // ✅ إضافة الصور المرجعية للـ Response
+        referenceImages // ✅ Add reference images to response
       }
     });
   } catch (error) {
@@ -128,7 +129,7 @@ export const createTask = async (req, res) => {
   try {
     const taskData = req.body;
     
-    // ✅ التحقق من وجود Site (إلزامي الآن)
+    // ✅ Validation: Site is required
     if (!taskData.site) {
       return res.status(400).json({
         success: false,
@@ -136,7 +137,15 @@ export const createTask = async (req, res) => {
       });
     }
 
-    // ✅ التحقق من وجود Site في قاعدة البيانات
+    // ✅ Validation: Section is required
+    if (!taskData.section) {
+      return res.status(400).json({
+        success: false,
+        message: 'Section is required'
+      });
+    }
+
+    // ✅ Verify Site exists
     const site = await Site.findById(taskData.site);
     if (!site) {
       return res.status(404).json({
@@ -145,23 +154,21 @@ export const createTask = async (req, res) => {
       });
     }
 
-    // ✅ إذا تم تحديد Section، نتحقق من وجوده
-    if (taskData.section) {
-      const section = site.sections.id(taskData.section);
-      if (!section) {
-        return res.status(404).json({
-          success: false,
-          message: 'Section not found in this site'
-        });
-      }
+    // ✅ Verify Section exists in Site
+    const section = site.sections.id(taskData.section);
+    if (!section) {
+      return res.status(404).json({
+        success: false,
+        message: 'Section not found in this site'
+      });
     }
 
-    // ✅ استخدام Client من Site إذا لم يتم تحديده
+    // ✅ Auto-fill Client from Site
     if (!taskData.client) {
       taskData.client = site.client;
     }
 
-    // ✅ التحقق من صحة ObjectIds
+    // ✅ Validate Client ID
     if (!mongoose.Types.ObjectId.isValid(taskData.client)) {
       return res.status(400).json({
         success: false,
@@ -171,7 +178,7 @@ export const createTask = async (req, res) => {
 
     const task = await Task.create(taskData);
 
-    // ✅ جلب البيانات الكاملة بعد الإنشاء
+    // ✅ Populate full data
     const populatedTask = await Task.findById(task._id)
       .populate('client', 'name email phone')
       .populate('worker', 'name email')
@@ -421,7 +428,7 @@ export const completeTask = async (req, res) => {
 };
 
 /**
- * @desc    Upload task images (before/after/reference)
+ * @desc    Upload task images (before/after only)
  * @route   POST /api/v1/tasks/:id/images
  * @access  Private (Worker/Admin)
  */
@@ -446,10 +453,11 @@ export const uploadTaskImages = async (req, res) => {
 
     const { imageType, isVisibleToClient = true } = req.body;
 
-    if (!['before', 'after', 'reference'].includes(imageType)) {
+    // ✅ Only before/after allowed now (no reference)
+    if (!['before', 'after'].includes(imageType)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid image type. Must be: before, after, or reference'
+        message: 'Invalid image type. Must be: before or after'
       });
     }
 
@@ -472,7 +480,7 @@ export const uploadTaskImages = async (req, res) => {
     }));
 
     if (!task.images) {
-      task.images = { before: [], after: [], reference: [] };
+      task.images = { before: [], after: [] };
     }
 
     task.images[imageType].push(...imageObjects);
@@ -520,7 +528,7 @@ export const deleteTaskImage = async (req, res) => {
       });
     }
 
-    if (!['before', 'after', 'reference'].includes(imageType)) {
+    if (!['before', 'after'].includes(imageType)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid image type'
