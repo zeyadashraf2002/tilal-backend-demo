@@ -1,3 +1,4 @@
+// backend/src/models/Task.js - ✅ UPDATED
 import mongoose from 'mongoose';
 
 const taskSchema = new mongoose.Schema({
@@ -11,6 +12,18 @@ const taskSchema = new mongoose.Schema({
     required: [true, 'Task description is required'],
     maxlength: 2000
   },
+  
+  // ✅ UPDATED: Site & Section (both required now)
+  site: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Site',
+    required: [true, 'Site is required']
+  },
+  section: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: [true, 'Section is required'] // ✅ Now required
+  },
+  
   client: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Client',
@@ -26,6 +39,7 @@ const taskSchema = new mongoose.Schema({
     ref: 'Branch',
     required: true
   },
+  
   status: {
     type: String,
     enum: ['pending', 'assigned', 'in-progress', 'completed', 'review', 'rejected'],
@@ -41,6 +55,7 @@ const taskSchema = new mongoose.Schema({
     enum: ['lawn-mowing', 'tree-trimming', 'landscaping', 'irrigation', 'pest-control', 'other'],
     default: 'other'
   },
+  
   scheduledDate: {
     type: Date,
     required: true
@@ -50,9 +65,10 @@ const taskSchema = new mongoose.Schema({
     default: 2
   },
   actualDuration: {
-    type: Number, // in hours
+    type: Number,
     default: 0
   },
+  
   // GPS Tracking
   location: {
     address: String,
@@ -75,10 +91,12 @@ const taskSchema = new mongoose.Schema({
     },
     timestamp: Date
   },
-  // Images (up to 50 images each)
+  
+  // ✅ IMAGES: Before/After only (reference images come from Section)
   images: {
     before: [{
       url: String,
+      cloudinaryId: String,
       thumbnail: String,
       uploadedAt: {
         type: Date,
@@ -95,6 +113,7 @@ const taskSchema = new mongoose.Schema({
     }],
     after: [{
       url: String,
+      cloudinaryId: String,
       thumbnail: String,
       uploadedAt: {
         type: Date,
@@ -108,29 +127,12 @@ const taskSchema = new mongoose.Schema({
         type: Boolean,
         default: false
       }
-    }],
-    reference: [{
-      url: String,
-      thumbnail: String,
-      description: String,
-      uploadedAt: {
-        type: Date,
-        default: Date.now
-      }
     }]
+    // ❌ REMOVED: reference array (now comes from Section)
   },
-  // Plants used in this task
-  plants: [{
-    plant: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Plant'
-    },
-    quantity: {
-      type: Number,
-      default: 1
-    },
-    notes: String
-  }],
+  
+  // ❌ REMOVED: plants array (not needed anymore)
+  
   // Materials
   materials: [{
     item: {
@@ -150,6 +152,7 @@ const taskSchema = new mongoose.Schema({
       ref: 'User'
     }
   }],
+  
   // Cost
   cost: {
     labor: {
@@ -165,9 +168,11 @@ const taskSchema = new mongoose.Schema({
       default: 0
     }
   },
+  
   // Timeline
   startedAt: Date,
   completedAt: Date,
+  
   // Admin Review
   adminReview: {
     status: {
@@ -182,6 +187,7 @@ const taskSchema = new mongoose.Schema({
     },
     reviewedAt: Date
   },
+  
   // Client Feedback
   feedback: {
     rating: {
@@ -192,28 +198,13 @@ const taskSchema = new mongoose.Schema({
     comment: String,
     submittedAt: Date
   },
-  client: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: 'Client',
-  required: true
-},
-
-site: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: 'Site',
-  required: true
-},
-
-section: {
-  type: mongoose.Schema.Types.ObjectId,
-  default: null
-},
-
+  
   // Invoice
   invoice: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Invoice'
   },
+  
   notes: {
     type: String,
     maxlength: 1000
@@ -222,9 +213,10 @@ section: {
   timestamps: true
 });
 
-// Indexes for better query performance
+// Indexes
 taskSchema.index({ client: 1, status: 1 });
 taskSchema.index({ worker: 1, status: 1 });
+taskSchema.index({ site: 1, section: 1 }); // ✅ New index
 taskSchema.index({ branch: 1, status: 1 });
 taskSchema.index({ scheduledDate: 1 });
 taskSchema.index({ status: 1, priority: 1 });
@@ -232,7 +224,7 @@ taskSchema.index({ status: 1, priority: 1 });
 // Calculate actual duration when task is completed
 taskSchema.pre('save', function(next) {
   if (this.startedAt && this.completedAt) {
-    const duration = (this.completedAt - this.startedAt) / (1000 * 60 * 60); // hours
+    const duration = (this.completedAt - this.startedAt) / (1000 * 60 * 60);
     this.actualDuration = Math.round(duration * 100) / 100;
   }
   
@@ -245,4 +237,3 @@ taskSchema.pre('save', function(next) {
 const Task = mongoose.model('Task', taskSchema);
 
 export default Task;
-
